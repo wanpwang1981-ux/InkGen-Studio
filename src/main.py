@@ -119,28 +119,28 @@ from agents.reader import Reader
 
 from agents.refiner import Refiner
 from agents.reader import Reader
+from agents.info_extractor import InfoExtractor
+from knowledge_base_manager import KnowledgeBaseManager
 
 def generate_novel(args):
     """
     Handler for the 'generate-novel' command.
-    This function orchestrates the full pipeline, including the revision loop.
+    This function orchestrates the full pipeline, including knowledge base interaction.
     """
-    print("--- InkGen Studio: Generate Novel Chapters ---")
+    print("--- InkGen Studio: Generate Novel Chapters with Knowledge Base ---")
 
     # 1. Load Outline and Persona
     if not os.path.exists(args.outline):
         print(f"Error: Outline file not found at '{args.outline}'"); return
-    with open(args.outline, 'r', encoding='utf-8') as f:
-        story_outline = json.load(f)
+    with open(args.outline, 'r', encoding='utf-8') as f: story_outline = json.load(f)
 
     persona_data = None
     if args.persona:
         if not os.path.exists(args.persona):
             print(f"Error: Persona file not found at '{args.persona}'"); return
-        with open(args.persona, 'r', encoding='utf-8') as f:
-            persona_data = json.load(f)
+        with open(args.persona, 'r', encoding='utf-8') as f: persona_data = json.load(f)
 
-    # 2. Setup output directories
+    # 2. Setup output directories and Knowledge Base
     novel_title = story_outline.get("novel_title", "Untitled Novel")
     safe_title = re.sub(r'[^\w\s-]', '', novel_title).strip().replace(' ', '_')
     base_output_dir = os.path.join(args.output_dir, safe_title)
@@ -150,57 +150,68 @@ def generate_novel(args):
     os.makedirs(reviews_dir, exist_ok=True)
     print(f"Output will be saved to '{base_output_dir}'")
 
-    # 3. Instantiate Agents and generate chapters
+    # Each novel gets a unique ID for its knowledge base, based on its safe title
+    kb_manager = KnowledgeBaseManager(novel_id=safe_title)
+
+    # 3. Instantiate Agents
     try:
         from config import config
         writer = Writer(persona=persona_data)
         refiner = Refiner(persona=persona_data)
         reader = Reader(persona=persona_data)
+        info_extractor = InfoExtractor()
 
-        context = f"Main Plot: {story_outline.get('main_plot', '')}\nCore Concepts: {story_outline.get('core_concepts', '')}"
+        short_term_context = f"Main Plot: {story_outline.get('main_plot', '')}\nCore Concepts: {story_outline.get('core_concepts', '')}"
 
         for chapter_outline in story_outline.get("chapters", []):
             chapter_number = chapter_outline.get("chapter_number")
             chapter_title = chapter_outline.get("title", f"Chapter {chapter_number}")
             print(f"\n--- Processing Chapter {chapter_number}: {chapter_title} ---")
 
-            # --- The Self-Correction Loop ---
+            # Step 1: Query Knowledge Base for relevant context
+            query_text = f"Information relevant to: {chapter_outline.get('summary', '')}"
+            relevant_knowledge = kb_manager.query(query_text)
+            knowledge_context = ""
+            if relevant_knowledge:
+                knowledge_context = "\n\n--- RELEVANT KNOWLEDGE FROM PREVIOUS CHAPTERS ---\n" + "\n".join(relevant_knowledge) + "\n--- END OF KNOWLEDGE ---"
+
+            full_context = knowledge_context + "\n\n" + short_term_context
+
+            # Step 2: The Self-Correction Loop
             revision_count = 0
-            # First attempt
-            draft_text = writer.run(chapter_outline=chapter_outline, context=context)
+            draft_text = writer.run(chapter_outline=chapter_outline, context=full_context)
             refined_text = refiner.run(draft_text=draft_text)
             review_result = reader.run(refined_text=refined_text, chapter_outline=chapter_outline)
 
-            # Revision loop if needed
             while review_result.get("status") == "revision_needed" and revision_count < args.max_revisions:
                 revision_count += 1
                 print(f"--- Revision Attempt {revision_count}/{args.max_revisions} for Chapter {chapter_number} ---")
                 feedback = review_result.get("feedback", "No specific feedback provided.")
-                print(f"Reader feedback: {feedback}")
-
-                draft_text = writer.run(chapter_outline=chapter_outline, context=context, revision_feedback=feedback)
+                draft_text = writer.run(chapter_outline=chapter_outline, context=full_context, revision_feedback=feedback)
                 refined_text = refiner.run(draft_text=draft_text)
                 review_result = reader.run(refined_text=refined_text, chapter_outline=chapter_outline)
 
-            if review_result.get("status") == "revision_needed":
-                print(f"Warning: Chapter {chapter_number} was not approved after {args.max_revisions} revisions. Saving the last version.")
+            # Step 3: Update Knowledge Base if chapter is approved
+            if review_result.get("status") == "approved":
+                print(f"Chapter {chapter_number} approved after {revision_count} revision(s). Updating knowledge base...")
+                new_facts = info_extractor.run(text_to_analyze=refined_text)
+                if new_facts:
+                    kb_manager.add(documents=new_facts)
             else:
-                print(f"Chapter {chapter_number} approved after {revision_count} revision(s).")
-            # --- End of Loop ---
+                print(f"Warning: Chapter {chapter_number} was not approved after {args.max_revisions} revisions. Knowledge base not updated for this chapter.")
 
-            # Save the final outputs
+            # Step 4: Save outputs
             safe_chapter_title = re.sub(r'[^\w\s-]', '', chapter_title).strip().replace(' ', '_')
             chapter_filename = f"{chapter_number:02d}_{safe_chapter_title}.txt"
             chapter_filepath = os.path.join(chapters_dir, chapter_filename)
-            print(f"Saving final chapter text to '{chapter_filepath}'...")
             with open(chapter_filepath, 'w', encoding='utf-8') as f: f.write(refined_text)
 
             review_filename = f"{chapter_number:02d}_{safe_chapter_title}_review.json"
             review_filepath = os.path.join(reviews_dir, review_filename)
-            print(f"Saving final review to '{review_filepath}'...")
             with open(review_filepath, 'w', encoding='utf-8') as f: json.dump(review_result, f, ensure_ascii=False, indent=2)
 
-            context = f"Summary of previous chapter ({chapter_title}): {chapter_outline.get('summary', '')}"
+            # Step 5: Update short-term context for the next chapter
+            short_term_context = f"Summary of previous chapter ({chapter_title}): {chapter_outline.get('summary', '')}"
 
         print(f"\nNovel generation complete! Output saved in '{base_output_dir}'")
 
