@@ -53,7 +53,8 @@ class LLMService:
             # Create an infinite iterator that cycles through the API keys.
             # This is the core of the round-robin rotation mechanism.
             self.api_key_cycler = cycle(config.api_keys)
-            self.model_name = "gemini-pro" # Default model, can be made configurable later
+            # The model name is now loaded from the central config.
+            self.model_name = config.model_name
 
     def _get_next_key(self) -> str:
         """

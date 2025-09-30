@@ -54,6 +54,11 @@ class Config:
                 "Please check the format in your .env file."
             )
 
+        # Load the language model name, providing a default value if it's not set.
+        self.model_name = os.getenv("LLM_MODEL_NAME", "gemini-pro")
+        print(f"Configuration loaded. Using model: {self.model_name}")
+
+
 # Create a single, globally accessible instance of the Config object.
 # Other modules can simply `from src.config import config` to access settings.
 config = Config()

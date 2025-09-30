@@ -4,266 +4,106 @@ InkGen Studio - Main Command-Line Interface (CLI)
 ==================================================
 
 This script serves as the main entry point for interacting with the
-InkGen Studio application from the command line.
-
-It provides commands to access the various functionalities of the system,
-starting with the creation of writer personas.
+InkGen Studio application from the command line. It delegates all
+complex logic to the Orchestrator.
 
 Author: Jules
 Date: 2025-09-30
-Version: 1.0
+Version: 1.1 (Refactored)
 """
 
 import argparse
-import json
 import os
-import re
-from agents.persona_architect import PersonaArchitect
-from agents.lead_architect import LeadArchitect
-from agents.writer import Writer
+from orchestrator import Orchestrator
 
-def create_persona(args):
-    """
-    Handler for the 'create-persona' command.
-    """
+def handle_create_persona(args, orchestrator):
+    """CLI handler for the 'create-persona' command."""
     print("--- InkGen Studio: Create Persona ---")
-
-    author_name = args.author
-    sample_paths = args.samples
-    output_path = args.output
-
-    for path in sample_paths:
+    for path in args.samples:
         if not os.path.exists(path):
-            print(f"Error: Sample file not found at '{path}'")
-            return
-
-    text_samples = []
-    print(f"Reading {len(sample_paths)} sample file(s)...")
-    for path in sample_paths:
-        with open(path, 'r', encoding='utf-8') as f:
-            text_samples.append(f.read())
-
-    extra_materials = ""
-    if args.extra:
-        if not os.path.exists(args.extra):
-            print(f"Error: Extra materials file not found at '{args.extra}'")
-            return
-        print(f"Reading extra materials from '{args.extra}'...")
-        with open(args.extra, 'r', encoding='utf-8') as f:
-            extra_materials = f.read()
+            print(f"Error: Sample file not found at '{path}'"); return
+    if args.extra and not os.path.exists(args.extra):
+        print(f"Error: Extra materials file not found at '{args.extra}'"); return
 
     try:
-        from config import config
-        print(f"Found {len(config.api_keys)} API key(s).")
-        architect = PersonaArchitect()
-        persona_profile = architect.run(
-            author_name=author_name,
-            text_samples=text_samples,
-            other_materials=extra_materials
-        )
-    except (ValueError, Exception) as e:
+        orchestrator.run_create_persona(args.author, args.samples, args.output, args.extra)
+    except Exception as e:
         print(f"\nAn error occurred during persona creation: {e}")
-        return
 
-    print(f"Saving generated persona profile to '{output_path}'...")
-    try:
-        output_dir = os.path.dirname(output_path)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(persona_profile, f, ensure_ascii=False, indent=2)
-        print(f"\nPersona creation successful! Profile saved to '{output_path}'")
-    except IOError as e:
-        print(f"Error: Could not write to output file '{output_path}'. Reason: {e}")
-
-def create_outline(args):
-    """
-    Handler for the 'create-outline' command.
-    """
+def handle_create_outline(args, orchestrator):
+    """CLI handler for the 'create-outline' command."""
     print("--- InkGen Studio: Create Novel Outline ---")
-
-    persona_data = None
-    if args.persona:
-        print(f"Loading persona from '{args.persona}'...")
-        if not os.path.exists(args.persona):
-            print(f"Error: Persona file not found at '{args.persona}'")
-            return
-        with open(args.persona, 'r', encoding='utf-8') as f:
-            persona_data = json.load(f)
+    if args.persona and not os.path.exists(args.persona):
+        print(f"Error: Persona file not found at '{args.persona}'"); return
 
     try:
-        from config import config
-        print(f"Found {len(config.api_keys)} API key(s).")
-        architect = LeadArchitect(persona=persona_data)
-        story_outline = architect.run(
-            novel_title=args.title,
-            num_chapters=args.chapters
-        )
-    except (ValueError, Exception) as e:
+        orchestrator.run_create_outline(args.title, args.output, args.chapters, args.persona)
+    except Exception as e:
         print(f"\nAn error occurred during outline creation: {e}")
-        return
 
-    print(f"Saving generated outline to '{args.output}'...")
-    try:
-        output_dir = os.path.dirname(args.output)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-        with open(args.output, 'w', encoding='utf-8') as f:
-            json.dump(story_outline, f, ensure_ascii=False, indent=2)
-        print(f"\nOutline creation successful! Outline saved to '{args.output}'")
-    except IOError as e:
-        print(f"Error: Could not write to output file '{args.output}'. Reason: {e}")
-
-from agents.refiner import Refiner
-from agents.reader import Reader
-
-from agents.refiner import Refiner
-from agents.reader import Reader
-from agents.info_extractor import InfoExtractor
-from knowledge_base_manager import KnowledgeBaseManager
-
-def generate_novel(args):
-    """
-    Handler for the 'generate-novel' command.
-    This function orchestrates the full pipeline, including knowledge base interaction.
-    """
-    print("--- InkGen Studio: Generate Novel Chapters with Knowledge Base ---")
-
-    # 1. Load Outline and Persona
+def handle_init_project(args, orchestrator):
+    """CLI handler for the 'init' command."""
     if not os.path.exists(args.outline):
         print(f"Error: Outline file not found at '{args.outline}'"); return
-    with open(args.outline, 'r', encoding='utf-8') as f: story_outline = json.load(f)
+    if args.persona and not os.path.exists(args.persona):
+        print(f"Error: Persona file not found at '{args.persona}'"); return
 
-    persona_data = None
-    if args.persona:
-        if not os.path.exists(args.persona):
-            print(f"Error: Persona file not found at '{args.persona}'"); return
-        with open(args.persona, 'r', encoding='utf-8') as f: persona_data = json.load(f)
-
-    # 2. Setup output directories and Knowledge Base
-    novel_title = story_outline.get("novel_title", "Untitled Novel")
-    safe_title = re.sub(r'[^\w\s-]', '', novel_title).strip().replace(' ', '_')
-    base_output_dir = os.path.join(args.output_dir, safe_title)
-    chapters_dir = os.path.join(base_output_dir, "chapters")
-    reviews_dir = os.path.join(base_output_dir, "reviews")
-    os.makedirs(chapters_dir, exist_ok=True)
-    os.makedirs(reviews_dir, exist_ok=True)
-    print(f"Output will be saved to '{base_output_dir}'")
-
-    # Each novel gets a unique ID for its knowledge base, based on its safe title
-    kb_manager = KnowledgeBaseManager(novel_id=safe_title)
-
-    # 3. Instantiate Agents
     try:
-        from config import config
-        writer = Writer(persona=persona_data)
-        refiner = Refiner(persona=persona_data)
-        reader = Reader(persona=persona_data)
-        info_extractor = InfoExtractor()
+        orchestrator.run_init_project(args.title, args.outline, args.persona, args.output_dir)
+    except Exception as e:
+        print(f"\nAn error occurred during project initialization: {e}")
 
-        short_term_context = f"Main Plot: {story_outline.get('main_plot', '')}\nCore Concepts: {story_outline.get('core_concepts', '')}"
+def handle_generate_novel(args, orchestrator):
+    """CLI handler for the 'generate-novel' command."""
+    print("--- InkGen Studio: Generate Novel Chapters ---")
+    project_path = args.project
+    if not os.path.exists(project_path) or not os.path.isdir(project_path) or not os.path.exists(os.path.join(project_path, "project.json")):
+        print(f"Error: Project directory '{project_path}' is not valid or does not contain a project.json file."); return
 
-        for chapter_outline in story_outline.get("chapters", []):
-            chapter_number = chapter_outline.get("chapter_number")
-            chapter_title = chapter_outline.get("title", f"Chapter {chapter_number}")
-            print(f"\n--- Processing Chapter {chapter_number}: {chapter_title} ---")
-
-            # Step 1: Query Knowledge Base for relevant context
-            query_text = f"Information relevant to: {chapter_outline.get('summary', '')}"
-            relevant_knowledge = kb_manager.query(query_text)
-            knowledge_context = ""
-            if relevant_knowledge:
-                knowledge_context = "\n\n--- RELEVANT KNOWLEDGE FROM PREVIOUS CHAPTERS ---\n" + "\n".join(relevant_knowledge) + "\n--- END OF KNOWLEDGE ---"
-
-            full_context = knowledge_context + "\n\n" + short_term_context
-
-            # Step 2: The Self-Correction Loop
-            revision_count = 0
-            draft_text = writer.run(chapter_outline=chapter_outline, context=full_context)
-            refined_text = refiner.run(draft_text=draft_text)
-            review_result = reader.run(refined_text=refined_text, chapter_outline=chapter_outline)
-
-            while review_result.get("status") == "revision_needed" and revision_count < args.max_revisions:
-                revision_count += 1
-                print(f"--- Revision Attempt {revision_count}/{args.max_revisions} for Chapter {chapter_number} ---")
-                feedback = review_result.get("feedback", "No specific feedback provided.")
-                draft_text = writer.run(chapter_outline=chapter_outline, context=full_context, revision_feedback=feedback)
-                refined_text = refiner.run(draft_text=draft_text)
-                review_result = reader.run(refined_text=refined_text, chapter_outline=chapter_outline)
-
-            # Step 3: Update Knowledge Base if chapter is approved
-            if review_result.get("status") == "approved":
-                print(f"Chapter {chapter_number} approved after {revision_count} revision(s). Updating knowledge base...")
-                new_facts = info_extractor.run(text_to_analyze=refined_text)
-                if new_facts:
-                    kb_manager.add(documents=new_facts)
-            else:
-                print(f"Warning: Chapter {chapter_number} was not approved after {args.max_revisions} revisions. Knowledge base not updated for this chapter.")
-
-            # Step 4: Save outputs
-            safe_chapter_title = re.sub(r'[^\w\s-]', '', chapter_title).strip().replace(' ', '_')
-            chapter_filename = f"{chapter_number:02d}_{safe_chapter_title}.txt"
-            chapter_filepath = os.path.join(chapters_dir, chapter_filename)
-            with open(chapter_filepath, 'w', encoding='utf-8') as f: f.write(refined_text)
-
-            review_filename = f"{chapter_number:02d}_{safe_chapter_title}_review.json"
-            review_filepath = os.path.join(reviews_dir, review_filename)
-            with open(review_filepath, 'w', encoding='utf-8') as f: json.dump(review_result, f, ensure_ascii=False, indent=2)
-
-            # Step 5: Update short-term context for the next chapter
-            short_term_context = f"Summary of previous chapter ({chapter_title}): {chapter_outline.get('summary', '')}"
-
-        print(f"\nNovel generation complete! Output saved in '{base_output_dir}'")
-
-    except (ValueError, Exception) as e:
+    try:
+        orchestrator.run_generate_novel(project_path, args.max_revisions)
+    except Exception as e:
         print(f"\nAn error occurred during novel generation: {e}")
-        return
 
 def main():
-    """
-    Main function to parse command-line arguments and dispatch commands.
-    """
-    parser = argparse.ArgumentParser(
-        description="InkGen Studio: AI-powered writing assistant for web novels."
-    )
+    """Main function to parse CLI arguments and dispatch commands."""
+    parser = argparse.ArgumentParser(description="InkGen Studio: AI-powered writing assistant.")
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
 
+    # --- 'init' command ---
+    parser_init = subparsers.add_parser("init", help="Initialize a new novel project directory.")
+    parser_init.add_argument("--title", type=str, required=True, help="The title of the new novel.")
+    parser_init.add_argument("--outline", type=str, required=True, help="Path to the JSON story outline file.")
+    parser_init.add_argument("--persona", type=str, help="Optional path to a JSON persona profile.")
+    parser_init.add_argument("--output-dir", type=str, default="novels/", help="Base directory to create the project in (default: 'novels/').")
+    parser_init.set_defaults(func=handle_init_project)
+
     # --- 'create-persona' command ---
-    parser_persona = subparsers.add_parser(
-        "create-persona",
-        help="Create a new writer persona from sample texts."
-    )
-    parser_persona.add_argument("--author", type=str, required=True, help="The name of the author to create a persona for.")
-    parser_persona.add_argument("--samples", type=str, nargs='+', required=True, help="One or more file paths to text samples of the author's work.")
-    parser_persona.add_argument("--extra", type=str, help="Optional file path to extra materials (interviews, analysis, etc.).")
-    parser_persona.add_argument("--output", type=str, required=True, help="The file path to save the generated JSON persona profile.")
-    parser_persona.set_defaults(func=create_persona)
+    parser_persona = subparsers.add_parser("create-persona", help="Create a new writer persona.")
+    parser_persona.add_argument("--author", type=str, required=True, help="Name of the author to create a persona for.")
+    parser_persona.add_argument("--samples", type=str, nargs='+', required=True, help="Path(s) to text samples of the author's work.")
+    parser_persona.add_argument("--extra", type=str, help="Optional path to extra materials (interviews, etc.).")
+    parser_persona.add_argument("--output", type=str, required=True, help="Path to save the generated JSON persona profile.")
+    parser_persona.set_defaults(func=handle_create_persona)
 
     # --- 'create-outline' command ---
-    parser_outline = subparsers.add_parser(
-        "create-outline",
-        help="Create a new novel outline using a title and optional persona."
-    )
-    parser_outline.add_argument("--title", type=str, required=True, help="The title or core theme of the novel.")
-    parser_outline.add_argument("--persona", type=str, help="Optional file path to a JSON persona profile to guide the style.")
-    parser_outline.add_argument("--chapters", type=int, default=10, help="The target number of chapters for the outline (default: 10).")
-    parser_outline.add_argument("--output", type=str, required=True, help="The file path to save the generated JSON outline.")
-    parser_outline.set_defaults(func=create_outline)
+    parser_outline = subparsers.add_parser("create-outline", help="Create a new novel outline.")
+    parser_outline.add_argument("--title", type=str, required=True, help="Title or core theme of the novel.")
+    parser_outline.add_argument("--persona", type=str, help="Optional path to a JSON persona profile.")
+    parser_outline.add_argument("--chapters", type=int, default=10, help="Target number of chapters (default: 10).")
+    parser_outline.add_argument("--output", type=str, required=True, help="Path to save the generated JSON outline.")
+    parser_outline.set_defaults(func=handle_create_outline)
 
     # --- 'generate-novel' command ---
-    parser_generate = subparsers.add_parser(
-        "generate-novel",
-        help="Generate a full novel draft from an outline file."
-    )
-    parser_generate.add_argument("--outline", type=str, required=True, help="File path to the JSON story outline.")
-    parser_generate.add_argument("--persona", type=str, help="Optional file path to a JSON persona profile.")
-    parser_generate.add_argument("--output-dir", type=str, default="novels/", help="The directory to save the generated novel chapters (default: 'novels/').")
-    parser_generate.add_argument("--max-revisions", type=int, default=2, help="The maximum number of revisions per chapter (default: 2).")
-    parser_generate.set_defaults(func=generate_novel)
+    parser_generate = subparsers.add_parser("generate-novel", help="Generate novel chapters from a project.")
+    parser_generate.add_argument("--project", type=str, required=True, help="Path to the project directory containing project.json.")
+    parser_generate.add_argument("--max-revisions", type=int, default=2, help="Maximum number of revisions per chapter (default: 2).")
+    parser_generate.set_defaults(func=handle_generate_novel)
 
-    # --- Parse arguments and call the corresponding function ---
     args = parser.parse_args()
-    args.func(args)
+
+    orchestrator = Orchestrator()
+    args.func(args, orchestrator)
 
 if __name__ == "__main__":
     main()
