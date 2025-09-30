@@ -114,9 +114,13 @@ def create_outline(args):
     except IOError as e:
         print(f"Error: Could not write to output file '{args.output}'. Reason: {e}")
 
+from agents.refiner import Refiner
+from agents.reader import Reader
+
 def generate_novel(args):
     """
     Handler for the 'generate-novel' command.
+    This function orchestrates the full pipeline: Write -> Refine -> Review.
     """
     print("--- InkGen Studio: Generate Novel Chapters ---")
 
@@ -138,44 +142,62 @@ def generate_novel(args):
         with open(args.persona, 'r', encoding='utf-8') as f:
             persona_data = json.load(f)
 
-    # 3. Setup output directory
+    # 3. Setup output directories
     novel_title = story_outline.get("novel_title", "Untitled Novel")
     safe_title = re.sub(r'[^\w\s-]', '', novel_title).strip().replace(' ', '_')
-    output_dir = os.path.join(args.output_dir, safe_title)
-    print(f"Output will be saved to '{output_dir}'")
-    os.makedirs(output_dir, exist_ok=True)
+    base_output_dir = os.path.join(args.output_dir, safe_title)
+    chapters_dir = os.path.join(base_output_dir, "chapters")
+    reviews_dir = os.path.join(base_output_dir, "reviews")
+    os.makedirs(chapters_dir, exist_ok=True)
+    os.makedirs(reviews_dir, exist_ok=True)
+    print(f"Output will be saved to '{base_output_dir}'")
 
-    # 4. Instantiate Writer and generate chapters
+    # 4. Instantiate Agents and generate chapters
     try:
         from config import config
         print(f"Found {len(config.api_keys)} API key(s).")
         writer = Writer(persona=persona_data)
+        refiner = Refiner(persona=persona_data)
+        reader = Reader(persona=persona_data)
 
-        # Use core concepts as the initial context for the first chapter
         context = f"Main Plot: {story_outline.get('main_plot', '')}\nCore Concepts: {story_outline.get('core_concepts', '')}"
 
         chapters = story_outline.get("chapters", [])
         for i, chapter_outline in enumerate(chapters):
             chapter_number = chapter_outline.get("chapter_number")
             chapter_title = chapter_outline.get("title", f"Chapter {chapter_number}")
+            print(f"\n--- Processing Chapter {chapter_number}: {chapter_title} ---")
 
-            chapter_text = writer.run(
-                chapter_outline=chapter_outline,
-                context=context
-            )
+            # Step 1: Write
+            draft_text = writer.run(chapter_outline=chapter_outline, context=context)
 
+            # Step 2: Refine
+            refined_text = refiner.run(draft_text=draft_text)
+
+            # Step 3: Review
+            review_result = reader.run(refined_text=refined_text, chapter_outline=chapter_outline)
+
+            # Step 4: Save outputs
             safe_chapter_title = re.sub(r'[^\w\s-]', '', chapter_title).strip().replace(' ', '_')
-            filename = f"{chapter_number:02d}_{safe_chapter_title}.txt"
-            filepath = os.path.join(output_dir, filename)
 
-            print(f"Saving chapter {chapter_number} to '{filepath}'...")
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(chapter_text)
+            # Save refined chapter text
+            chapter_filename = f"{chapter_number:02d}_{safe_chapter_title}.txt"
+            chapter_filepath = os.path.join(chapters_dir, chapter_filename)
+            print(f"Saving refined chapter to '{chapter_filepath}'...")
+            with open(chapter_filepath, 'w', encoding='utf-8') as f:
+                f.write(refined_text)
 
-            # For the next chapter, the context is the summary of the one just written
+            # Save review result
+            review_filename = f"{chapter_number:02d}_{safe_chapter_title}_review.json"
+            review_filepath = os.path.join(reviews_dir, review_filename)
+            print(f"Saving review to '{review_filepath}'...")
+            with open(review_filepath, 'w', encoding='utf-8') as f:
+                json.dump(review_result, f, ensure_ascii=False, indent=2)
+
+            # Step 5: Update context for the next chapter
             context = f"Summary of previous chapter ({chapter_title}): {chapter_outline.get('summary', '')}"
 
-        print(f"\nNovel generation complete! {len(chapters)} chapters saved in '{output_dir}'")
+        print(f"\nNovel generation complete! {len(chapters)} chapters and reviews saved in '{base_output_dir}'")
 
     except (ValueError, Exception) as e:
         print(f"\nAn error occurred during novel generation: {e}")
