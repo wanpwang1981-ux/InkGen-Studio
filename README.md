@@ -56,27 +56,43 @@ cp .env.example .env
 GEMINI_API_KEYS=your_key_1,your_key_2
 ```
 
-### 3. 如何使用：創建一個人格設定檔
+### 3. 如何執行 (How to Run)
 
-一切準備就緒後，您可以使用 `main.py` 中的命令列介面來創建您第一個作家的人格。
+本專案包含一個後端 API 服務和一個前端使用者介面。您需要同時啟動它們。
+
+**A. 啟動後端 API 伺服器**
+
+在您的終端機中，執行以下命令：
+
+```bash
+# 從專案根目錄執行
+python -m uvicorn src.api_server:app --reload
+```
+
+您應該會看到類似 `Uvicorn running on http://127.0.0.1:8000` 的訊息。請保持這個終端機視窗開啟。
+
+**B. 使用前端介面**
+
+1.  打開您的網頁瀏覽器（如 Chrome, Firefox, Edge）。
+2.  在瀏覽器中，直接打開專案中的 `frontend/index.html` 檔案。
+    *   您可以使用檔案總管，將 `index.html` 檔案拖曳到瀏覽器視窗中。
+    *   或者，在瀏覽器的地址欄中輸入 `file:///` 加上您專案的完整路徑，例如：`file:///path/to/your/inkgen-studio/frontend/index.html`
+
+現在您就可以在網頁上看到「墨影生成所」的操作介面，並透過表單與後端 API 互動了。
+
+### 4. (可選) 使用命令列介面
+
+除了前端介面，您依然可以使用 `main.py` 中的命令列工具來執行所有核心功能。
 
 **使用範例：**
 
-假設您想模仿作家「倪匡」，並且您已經準備好了兩個包含他作品的文字檔案 (`ni_kuang_sample1.txt`, `ni_kuang_sample2.txt`)。
-
-執行以下命令：
-
 ```bash
-python -m src.main create-persona \
-    --author "倪匡" \
-    --samples "path/to/your/ni_kuang_sample1.txt" "path/to/your/ni_kuang_sample2.txt" \
-    --output "personas/ni_kuang.json"
-```
+# 初始化一個新專案
+python -m src.main init --title "星際之夢" --outline "path/to/outline.json"
 
-**參數說明：**
-*   `--author`: 您想模仿的作家名稱。
-*   `--samples`: 一個或多個包含作家作品的文字檔案路徑。
-*   `--output`: 生成的人格設定檔 (JSON 格式) 的儲存路徑。
+# 從專案開始生成小說
+python -m src.main generate-novel --project "novels/星際之夢"
+```
 
 執行成功後，您會在 `personas/` 目錄下找到一個名為 `ni_kuang.json` 的檔案，裡面包含了對倪匡寫作風格的詳細分析。
 
