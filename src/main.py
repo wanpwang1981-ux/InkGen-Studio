@@ -17,8 +17,10 @@ Version: 1.0
 import argparse
 import json
 import os
+import re
 from agents.persona_architect import PersonaArchitect
 from agents.lead_architect import LeadArchitect
+from agents.writer import Writer
 
 def create_persona(args):
     """
@@ -112,6 +114,73 @@ def create_outline(args):
     except IOError as e:
         print(f"Error: Could not write to output file '{args.output}'. Reason: {e}")
 
+def generate_novel(args):
+    """
+    Handler for the 'generate-novel' command.
+    """
+    print("--- InkGen Studio: Generate Novel Chapters ---")
+
+    # 1. Load Outline
+    print(f"Loading outline from '{args.outline}'...")
+    if not os.path.exists(args.outline):
+        print(f"Error: Outline file not found at '{args.outline}'")
+        return
+    with open(args.outline, 'r', encoding='utf-8') as f:
+        story_outline = json.load(f)
+
+    # 2. Load Persona (optional)
+    persona_data = None
+    if args.persona:
+        print(f"Loading persona from '{args.persona}'...")
+        if not os.path.exists(args.persona):
+            print(f"Error: Persona file not found at '{args.persona}'")
+            return
+        with open(args.persona, 'r', encoding='utf-8') as f:
+            persona_data = json.load(f)
+
+    # 3. Setup output directory
+    novel_title = story_outline.get("novel_title", "Untitled Novel")
+    safe_title = re.sub(r'[^\w\s-]', '', novel_title).strip().replace(' ', '_')
+    output_dir = os.path.join(args.output_dir, safe_title)
+    print(f"Output will be saved to '{output_dir}'")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 4. Instantiate Writer and generate chapters
+    try:
+        from config import config
+        print(f"Found {len(config.api_keys)} API key(s).")
+        writer = Writer(persona=persona_data)
+
+        # Use core concepts as the initial context for the first chapter
+        context = f"Main Plot: {story_outline.get('main_plot', '')}\nCore Concepts: {story_outline.get('core_concepts', '')}"
+
+        chapters = story_outline.get("chapters", [])
+        for i, chapter_outline in enumerate(chapters):
+            chapter_number = chapter_outline.get("chapter_number")
+            chapter_title = chapter_outline.get("title", f"Chapter {chapter_number}")
+
+            chapter_text = writer.run(
+                chapter_outline=chapter_outline,
+                context=context
+            )
+
+            safe_chapter_title = re.sub(r'[^\w\s-]', '', chapter_title).strip().replace(' ', '_')
+            filename = f"{chapter_number:02d}_{safe_chapter_title}.txt"
+            filepath = os.path.join(output_dir, filename)
+
+            print(f"Saving chapter {chapter_number} to '{filepath}'...")
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(chapter_text)
+
+            # For the next chapter, the context is the summary of the one just written
+            context = f"Summary of previous chapter ({chapter_title}): {chapter_outline.get('summary', '')}"
+
+        print(f"\nNovel generation complete! {len(chapters)} chapters saved in '{output_dir}'")
+
+    except (ValueError, Exception) as e:
+        print(f"\nAn error occurred during novel generation: {e}")
+        return
+
 def main():
     """
     Main function to parse command-line arguments and dispatch commands.
@@ -142,6 +211,16 @@ def main():
     parser_outline.add_argument("--chapters", type=int, default=10, help="The target number of chapters for the outline (default: 10).")
     parser_outline.add_argument("--output", type=str, required=True, help="The file path to save the generated JSON outline.")
     parser_outline.set_defaults(func=create_outline)
+
+    # --- 'generate-novel' command ---
+    parser_generate = subparsers.add_parser(
+        "generate-novel",
+        help="Generate a full novel draft from an outline file."
+    )
+    parser_generate.add_argument("--outline", type=str, required=True, help="File path to the JSON story outline.")
+    parser_generate.add_argument("--persona", type=str, help="Optional file path to a JSON persona profile.")
+    parser_generate.add_argument("--output-dir", type=str, default="novels/", help="The directory to save the generated novel chapters (default: 'novels/').")
+    parser_generate.set_defaults(func=generate_novel)
 
     # --- Parse arguments and call the corresponding function ---
     args = parser.parse_args()

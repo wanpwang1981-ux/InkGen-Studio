@@ -39,16 +39,46 @@ class Writer(BaseAgent):
         Returns:
             str: The generated first draft of the chapter text.
         """
-        # The core logic will involve creating a detailed prompt that includes
-        # the persona, the chapter plan, and the context, then calling the LLM.
-
         chapter_title = chapter_outline.get('title', 'Untitled Chapter')
         print(f"Writer: Starting to write the first draft for chapter '{chapter_title}'...")
-        print("Writer: Writing logic is pending implementation.")
 
-        # Placeholder return value
-        return (
-            f"This is a placeholder first draft for the chapter: '{chapter_title}'.\n\n"
-            f"The outline was: {chapter_outline.get('summary', 'No summary provided.')}\n\n"
-            "The full text generation logic has not yet been implemented."
-        )
+        # 1. Construct the detailed prompt for the LLM
+        task_prompt = self._build_writing_prompt(chapter_outline, context)
+
+        # 2. Call the LLM service
+        print(f"Writer: Sending request to LLM for chapter '{chapter_title}'...")
+        try:
+            generated_text = self.llm_service.generate_text(task_prompt)
+            print(f"Writer: Successfully generated draft for chapter '{chapter_title}'.")
+            return generated_text
+        except Exception as e:
+            print(f"Writer: LLM call failed for chapter '{chapter_title}'. Error: {e}")
+            raise
+
+    def _build_writing_prompt(self, chapter_outline: Dict[str, Any], context: str) -> str:
+        """
+        Builds the detailed prompt for the LLM to write a chapter.
+        """
+        chapter_number = chapter_outline.get('chapter_number', 'N/A')
+        title = chapter_outline.get('title', 'Untitled')
+        summary = chapter_outline.get('summary', 'No summary provided.')
+
+        prompt = f"""
+You are a talented novelist. Your current task is to write a full chapter for a web novel.
+You must follow the instructions from your persona and the chapter outline provided below.
+The chapter should be detailed, engaging, and at least 2000 words long.
+
+--- CONTEXT FROM PREVIOUS CHAPTERS ---
+{context if context else "This is the first chapter. No previous context."}
+--- END OF CONTEXT ---
+
+--- CURRENT CHAPTER OUTLINE ---
+Chapter Number: {chapter_number}
+Title: {title}
+Summary of events to write: {summary}
+--- END OF OUTLINE ---
+
+Now, write the full chapter based on the outline and context. Ensure the writing style is consistent with your persona.
+Begin the chapter now.
+"""
+        return self._construct_prompt(prompt)
