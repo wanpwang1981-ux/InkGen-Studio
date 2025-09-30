@@ -117,32 +117,30 @@ def create_outline(args):
 from agents.refiner import Refiner
 from agents.reader import Reader
 
+from agents.refiner import Refiner
+from agents.reader import Reader
+
 def generate_novel(args):
     """
     Handler for the 'generate-novel' command.
-    This function orchestrates the full pipeline: Write -> Refine -> Review.
+    This function orchestrates the full pipeline, including the revision loop.
     """
     print("--- InkGen Studio: Generate Novel Chapters ---")
 
-    # 1. Load Outline
-    print(f"Loading outline from '{args.outline}'...")
+    # 1. Load Outline and Persona
     if not os.path.exists(args.outline):
-        print(f"Error: Outline file not found at '{args.outline}'")
-        return
+        print(f"Error: Outline file not found at '{args.outline}'"); return
     with open(args.outline, 'r', encoding='utf-8') as f:
         story_outline = json.load(f)
 
-    # 2. Load Persona (optional)
     persona_data = None
     if args.persona:
-        print(f"Loading persona from '{args.persona}'...")
         if not os.path.exists(args.persona):
-            print(f"Error: Persona file not found at '{args.persona}'")
-            return
+            print(f"Error: Persona file not found at '{args.persona}'"); return
         with open(args.persona, 'r', encoding='utf-8') as f:
             persona_data = json.load(f)
 
-    # 3. Setup output directories
+    # 2. Setup output directories
     novel_title = story_outline.get("novel_title", "Untitled Novel")
     safe_title = re.sub(r'[^\w\s-]', '', novel_title).strip().replace(' ', '_')
     base_output_dir = os.path.join(args.output_dir, safe_title)
@@ -152,52 +150,59 @@ def generate_novel(args):
     os.makedirs(reviews_dir, exist_ok=True)
     print(f"Output will be saved to '{base_output_dir}'")
 
-    # 4. Instantiate Agents and generate chapters
+    # 3. Instantiate Agents and generate chapters
     try:
         from config import config
-        print(f"Found {len(config.api_keys)} API key(s).")
         writer = Writer(persona=persona_data)
         refiner = Refiner(persona=persona_data)
         reader = Reader(persona=persona_data)
 
         context = f"Main Plot: {story_outline.get('main_plot', '')}\nCore Concepts: {story_outline.get('core_concepts', '')}"
 
-        chapters = story_outline.get("chapters", [])
-        for i, chapter_outline in enumerate(chapters):
+        for chapter_outline in story_outline.get("chapters", []):
             chapter_number = chapter_outline.get("chapter_number")
             chapter_title = chapter_outline.get("title", f"Chapter {chapter_number}")
             print(f"\n--- Processing Chapter {chapter_number}: {chapter_title} ---")
 
-            # Step 1: Write
+            # --- The Self-Correction Loop ---
+            revision_count = 0
+            # First attempt
             draft_text = writer.run(chapter_outline=chapter_outline, context=context)
-
-            # Step 2: Refine
             refined_text = refiner.run(draft_text=draft_text)
-
-            # Step 3: Review
             review_result = reader.run(refined_text=refined_text, chapter_outline=chapter_outline)
 
-            # Step 4: Save outputs
-            safe_chapter_title = re.sub(r'[^\w\s-]', '', chapter_title).strip().replace(' ', '_')
+            # Revision loop if needed
+            while review_result.get("status") == "revision_needed" and revision_count < args.max_revisions:
+                revision_count += 1
+                print(f"--- Revision Attempt {revision_count}/{args.max_revisions} for Chapter {chapter_number} ---")
+                feedback = review_result.get("feedback", "No specific feedback provided.")
+                print(f"Reader feedback: {feedback}")
 
-            # Save refined chapter text
+                draft_text = writer.run(chapter_outline=chapter_outline, context=context, revision_feedback=feedback)
+                refined_text = refiner.run(draft_text=draft_text)
+                review_result = reader.run(refined_text=refined_text, chapter_outline=chapter_outline)
+
+            if review_result.get("status") == "revision_needed":
+                print(f"Warning: Chapter {chapter_number} was not approved after {args.max_revisions} revisions. Saving the last version.")
+            else:
+                print(f"Chapter {chapter_number} approved after {revision_count} revision(s).")
+            # --- End of Loop ---
+
+            # Save the final outputs
+            safe_chapter_title = re.sub(r'[^\w\s-]', '', chapter_title).strip().replace(' ', '_')
             chapter_filename = f"{chapter_number:02d}_{safe_chapter_title}.txt"
             chapter_filepath = os.path.join(chapters_dir, chapter_filename)
-            print(f"Saving refined chapter to '{chapter_filepath}'...")
-            with open(chapter_filepath, 'w', encoding='utf-8') as f:
-                f.write(refined_text)
+            print(f"Saving final chapter text to '{chapter_filepath}'...")
+            with open(chapter_filepath, 'w', encoding='utf-8') as f: f.write(refined_text)
 
-            # Save review result
             review_filename = f"{chapter_number:02d}_{safe_chapter_title}_review.json"
             review_filepath = os.path.join(reviews_dir, review_filename)
-            print(f"Saving review to '{review_filepath}'...")
-            with open(review_filepath, 'w', encoding='utf-8') as f:
-                json.dump(review_result, f, ensure_ascii=False, indent=2)
+            print(f"Saving final review to '{review_filepath}'...")
+            with open(review_filepath, 'w', encoding='utf-8') as f: json.dump(review_result, f, ensure_ascii=False, indent=2)
 
-            # Step 5: Update context for the next chapter
             context = f"Summary of previous chapter ({chapter_title}): {chapter_outline.get('summary', '')}"
 
-        print(f"\nNovel generation complete! {len(chapters)} chapters and reviews saved in '{base_output_dir}'")
+        print(f"\nNovel generation complete! Output saved in '{base_output_dir}'")
 
     except (ValueError, Exception) as e:
         print(f"\nAn error occurred during novel generation: {e}")
@@ -242,6 +247,7 @@ def main():
     parser_generate.add_argument("--outline", type=str, required=True, help="File path to the JSON story outline.")
     parser_generate.add_argument("--persona", type=str, help="Optional file path to a JSON persona profile.")
     parser_generate.add_argument("--output-dir", type=str, default="novels/", help="The directory to save the generated novel chapters (default: 'novels/').")
+    parser_generate.add_argument("--max-revisions", type=int, default=2, help="The maximum number of revisions per chapter (default: 2).")
     parser_generate.set_defaults(func=generate_novel)
 
     # --- Parse arguments and call the corresponding function ---
