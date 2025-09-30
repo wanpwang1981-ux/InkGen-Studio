@@ -18,36 +18,29 @@ import argparse
 import json
 import os
 from agents.persona_architect import PersonaArchitect
+from agents.lead_architect import LeadArchitect
 
 def create_persona(args):
     """
     Handler for the 'create-persona' command.
-
-    This function orchestrates the process of creating a new writer persona
-    by reading input files, invoking the PersonaArchitect agent, and saving
-    the resulting profile.
     """
     print("--- InkGen Studio: Create Persona ---")
 
-    # --- 1. Input Validation and File Reading ---
     author_name = args.author
     sample_paths = args.samples
     output_path = args.output
 
-    # Validate that all sample files exist
     for path in sample_paths:
         if not os.path.exists(path):
             print(f"Error: Sample file not found at '{path}'")
             return
 
-    # Read text samples
     text_samples = []
     print(f"Reading {len(sample_paths)} sample file(s)...")
     for path in sample_paths:
         with open(path, 'r', encoding='utf-8') as f:
             text_samples.append(f.read())
 
-    # Read extra materials if provided
     extra_materials = ""
     if args.extra:
         if not os.path.exists(args.extra):
@@ -57,13 +50,9 @@ def create_persona(args):
         with open(args.extra, 'r', encoding='utf-8') as f:
             extra_materials = f.read()
 
-    # --- 2. Invoke the Agent ---
     try:
-        # Before running the agent, ensure API keys are set.
-        # The config module will raise an error if not, which we catch here.
         from config import config
         print(f"Found {len(config.api_keys)} API key(s).")
-
         architect = PersonaArchitect()
         persona_profile = architect.run(
             author_name=author_name,
@@ -74,23 +63,54 @@ def create_persona(args):
         print(f"\nAn error occurred during persona creation: {e}")
         return
 
-    # --- 3. Save the Output ---
     print(f"Saving generated persona profile to '{output_path}'...")
     try:
-        # Ensure the output directory exists
         output_dir = os.path.dirname(output_path)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(persona_profile, f, ensure_ascii=False, indent=2)
-
-        print("\nPersona creation successful!")
-        print(f"Profile for '{author_name}' saved to '{output_path}'")
-
+        print(f"\nPersona creation successful! Profile saved to '{output_path}'")
     except IOError as e:
         print(f"Error: Could not write to output file '{output_path}'. Reason: {e}")
 
+def create_outline(args):
+    """
+    Handler for the 'create-outline' command.
+    """
+    print("--- InkGen Studio: Create Novel Outline ---")
+
+    persona_data = None
+    if args.persona:
+        print(f"Loading persona from '{args.persona}'...")
+        if not os.path.exists(args.persona):
+            print(f"Error: Persona file not found at '{args.persona}'")
+            return
+        with open(args.persona, 'r', encoding='utf-8') as f:
+            persona_data = json.load(f)
+
+    try:
+        from config import config
+        print(f"Found {len(config.api_keys)} API key(s).")
+        architect = LeadArchitect(persona=persona_data)
+        story_outline = architect.run(
+            novel_title=args.title,
+            num_chapters=args.chapters
+        )
+    except (ValueError, Exception) as e:
+        print(f"\nAn error occurred during outline creation: {e}")
+        return
+
+    print(f"Saving generated outline to '{args.output}'...")
+    try:
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.output, 'w', encoding='utf-8') as f:
+            json.dump(story_outline, f, ensure_ascii=False, indent=2)
+        print(f"\nOutline creation successful! Outline saved to '{args.output}'")
+    except IOError as e:
+        print(f"Error: Could not write to output file '{args.output}'. Reason: {e}")
 
 def main():
     """
@@ -102,41 +122,30 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
 
     # --- 'create-persona' command ---
-    parser_create = subparsers.add_parser(
+    parser_persona = subparsers.add_parser(
         "create-persona",
         help="Create a new writer persona from sample texts."
     )
-    parser_create.add_argument(
-        "--author",
-        type=str,
-        required=True,
-        help="The name of the author to create a persona for (e.g., 'Ni Kuang')."
+    parser_persona.add_argument("--author", type=str, required=True, help="The name of the author to create a persona for.")
+    parser_persona.add_argument("--samples", type=str, nargs='+', required=True, help="One or more file paths to text samples of the author's work.")
+    parser_persona.add_argument("--extra", type=str, help="Optional file path to extra materials (interviews, analysis, etc.).")
+    parser_persona.add_argument("--output", type=str, required=True, help="The file path to save the generated JSON persona profile.")
+    parser_persona.set_defaults(func=create_persona)
+
+    # --- 'create-outline' command ---
+    parser_outline = subparsers.add_parser(
+        "create-outline",
+        help="Create a new novel outline using a title and optional persona."
     )
-    parser_create.add_argument(
-        "--samples",
-        type=str,
-        nargs='+',  # Allows one or more sample files
-        required=True,
-        help="One or more file paths to text samples of the author's work."
-    )
-    parser_create.add_argument(
-        "--extra",
-        type=str,
-        help="Optional file path to extra materials (interviews, analysis, etc.)."
-    )
-    parser_create.add_argument(
-        "--output",
-        type=str,
-        required=True,
-        help="The file path to save the generated JSON persona profile (e.g., 'personas/ni_kuang.json')."
-    )
-    parser_create.set_defaults(func=create_persona)
+    parser_outline.add_argument("--title", type=str, required=True, help="The title or core theme of the novel.")
+    parser_outline.add_argument("--persona", type=str, help="Optional file path to a JSON persona profile to guide the style.")
+    parser_outline.add_argument("--chapters", type=int, default=10, help="The target number of chapters for the outline (default: 10).")
+    parser_outline.add_argument("--output", type=str, required=True, help="The file path to save the generated JSON outline.")
+    parser_outline.set_defaults(func=create_outline)
 
     # --- Parse arguments and call the corresponding function ---
     args = parser.parse_args()
     args.func(args)
 
-
 if __name__ == "__main__":
-    # To run this from the root directory: python -m src.main create-persona ...
     main()
