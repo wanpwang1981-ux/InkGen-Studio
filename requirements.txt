@@ -1,0 +1,9 @@
+# Core dependencies for InkGen Studio
+
+google-generativeai
+pyyaml
+python-dotenv
+chromadb
+tqdm
+fastapi
+uvicorn[standard]

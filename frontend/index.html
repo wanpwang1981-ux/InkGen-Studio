@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>墨影生成所 (InkGen Studio)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>墨影生成所 (InkGen Studio)</h1>
+        <p>AI 驅動的網路小說創作平台</p>
+    </header>
+
+    <main>
+        <section id="project-init-section">
+            <h2>第一步：初始化新專案</h2>
+            <form id="init-form">
+                <div class="form-group">
+                    <label for="title">小說標題:</label>
+                    <input type="text" id="title" name="title" required placeholder="例如：星際探險家">
+                </div>
+                <div class="form-group">
+                    <label for="outline-path">大綱檔案路徑:</label>
+                    <input type="text" id="outline-path" name="outline-path" required placeholder="例如：docs/my_outline.json">
+                </div>
+                <div class="form-group">
+                    <label for="persona-path">人格設定檔路徑 (可選):</label>
+                    <input type="text" id="persona-path" name="persona-path" placeholder="例如：personas/ni_kuang.json">
+                </div>
+                <button type="submit">初始化專案</button>
+            </form>
+        </section>
+
+        <section id="novel-generation-section">
+            <h2>第二步：生成小說</h2>
+            <form id="generate-form">
+                <div class="form-group">
+                    <label for="project-path">專案路徑:</label>
+                    <input type="text" id="project-path" name="project-path" required placeholder="例如：novels/星際探險家">
+                </div>
+                <button type="submit">開始生成</button>
+            </form>
+        </section>
+
+        <section id="status-section">
+            <h2>狀態日誌</h2>
+            <div id="log-container">
+                <p>系統已就緒。請先初始化專案，然後開始生成小說。</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
